@@ -35,6 +35,12 @@ struct vector2d_t
   float y;
 };
 
+/* a sample is a point on the simulation grid in which a weight field is sampled, the size and 
+ * resolution (cell_width, i.e. sample seperation) is of the grid determines the number of
+ * sample points.
+ *
+ * The grid position of a sample is maintained by the grid.
+ */
 struct sample_t
 {
   float weight;
@@ -86,10 +92,10 @@ struct globber_t
   /* coordinates of the circle's center point w.r.t the grid */
   struct point2d_t center_g;
 
-  /* radius of circle (unit: meters) */
+  /* radius of globber (unit: meters) */
   float r_m;
 
-  /* direction circle is moving (unit vector) */
+  /* direction globber is moving (unit vector) */
   struct vector2d_t dir;
 };
 
