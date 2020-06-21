@@ -6,6 +6,8 @@
 #include <assert.h>
 #include "clock.h"
 
+#include "metaballs.h"
+
 #define TICK_DELTA_S 0.0166666
 #define MAX_TICKS_PER_FRAME 5
 
@@ -86,7 +88,7 @@ static const int xz_grid_vertex_component_count = xz_grid_vertex_count * 3;
 static const float cell_width_m = 1.f;
 static const float grid_width_m = cell_width_m * (float)xz_grid_lines;
 static const float grid_half_width_m = grid_width_m * 0.5f;
-static GLfloat xzgrid[360]; 
+static GLfloat xzgrid[372]; 
 
 /* generate_xz_grid - generates a vertex array which can be used to render
  * a grid in the world space x-z plane. The grid is centered about it's origin.
@@ -218,11 +220,11 @@ run()
 
   generate_xz_grid(xzgrid, 1.f, xz_grid_lines, xz_grid_lines);
 
+  glEnableClientState(GL_VERTEX_ARRAY);
+
   glCullFace(GL_BACK);
   glFrontFace(GL_CCW);
   glEnable(GL_CULL_FACE);
-
-  glEnableClientState(GL_VERTEX_ARRAY);
 
   struct {
     float x;
@@ -235,6 +237,8 @@ run()
   camera.z = 10.f;
   camera.y_move = camera.x_move = 0;
   float camera_delta_pos_m = 10.f * TICK_DELTA_S;
+
+  init_metaballs((struct point2d_t){1.f, 1.f});
 
   double next_tick_s = TICK_DELTA_S;
   bool redraw = true;
@@ -317,6 +321,8 @@ run()
       camera.x += camera.x_move * camera_delta_pos_m;
       camera.y += camera.y_move * camera_delta_pos_m;
 
+      tick_metaballs();
+
       next_tick_s += TICK_DELTA_S;
       ++tick_count;
       redraw = true;
@@ -332,23 +338,24 @@ run()
       glTranslatef(camera.x, -camera.y, -camera.z);
 
       /* draw xy grid */
-      glColor3f(0.5f, 0.5f, 0.5f);
-      glVertexPointer(3, GL_FLOAT, 0, xzgrid);
-      glPushMatrix();
-      glTranslatef(grid_half_width_m, grid_half_width_m, 0.f);
-      glRotatef(90.f, 1.0f, 0.0f, 0.0f);
-      glDrawArrays(GL_LINES, 0, xz_grid_vertex_count);
-      glPopMatrix();
+      //glDisableClientState(GL_COLOR_ARRAY);
+      //glColor3f(0.5f, 0.5f, 0.5f);
+      //glVertexPointer(3, GL_FLOAT, 0, xzgrid);
+      //glPushMatrix();
+      ////glTranslatef(grid_half_width_m, grid_half_width_m, 0.f);
+      //glRotatef(90.f, 1.0f, 0.0f, 0.0f);
+      //glDrawArrays(GL_LINES, 0, xz_grid_vertex_count);
+      //glPopMatrix();
 
       glEnableClientState(GL_COLOR_ARRAY);
 
       /* draw cube */
-      glPushMatrix();
-      glRotatef(90.f, 0.0f, 1.0f, 0.0f);
-      glVertexPointer(3, GL_FLOAT, 0, cube_vertices);
-      glColorPointer(3, GL_FLOAT, 0, cube_colors);
-      glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_BYTE, cube_indices);
-      glPopMatrix();
+      //glPushMatrix();
+      //glRotatef(90.f, 0.0f, 1.0f, 0.0f);
+      //glVertexPointer(3, GL_FLOAT, 0, cube_vertices);
+      //glColorPointer(3, GL_FLOAT, 0, cube_colors);
+      //glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_BYTE, cube_indices);
+      //glPopMatrix();
 
       /* draw world space axes */
       glLineWidth(2.0);
@@ -357,6 +364,8 @@ run()
       glDrawArrays(GL_LINES, 0, 8);
       glLineWidth(1.0);
       glDisableClientState(GL_COLOR_ARRAY);
+
+      draw_metaballs();
 
       SDL_GL_SwapWindow(window);
       redraw = false;

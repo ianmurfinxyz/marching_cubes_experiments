@@ -1,2 +1,2 @@
-test : main.c clock.c clock.h 
-	gcc -g -o test main.c clock.c -lSDL2 -lGLU -lGLX_mesa 
+test : main.c clock.c clock.h metaballs.c metaballs.h
+	gcc -g -o test main.c clock.c metaballs.c -lSDL2 -lGLU -lGLX_mesa -lm
