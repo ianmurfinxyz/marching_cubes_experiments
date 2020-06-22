@@ -234,7 +234,7 @@ run()
     int x_move;
   } camera;
   camera.x = camera.y = 0.f;
-  camera.z = 10.f;
+  camera.z = 20.f;
   camera.y_move = camera.x_move = 0;
   float camera_delta_pos_m = 10.f * TICK_DELTA_S;
 

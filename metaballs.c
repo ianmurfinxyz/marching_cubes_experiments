@@ -3,6 +3,8 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 #include <math.h>
 
 #include "metaballs.h"
@@ -21,18 +23,22 @@
 #define SAMPLE_COLOR_G_OFFSET  1
 #define SAMPLE_COLOR_B_OFFSET  2
 
-#define SAMPLE_DRAW_DIAMETER_PX 4
+#define SAMPLE_DRAW_DIAMETER_PX 1
 
 /*** CELLS ***************************************************************************************/
 
 /* width/height of cells; same as distance between samples (unit: meters) */
-#define CELL_SIZE_M 0.1f
+#define CELL_SIZE_M 0.3f
 
 /*** GLOBBERS ************************************************************************************/
 
 /* the number of globs moving around the simulation; the interaction
  * between these globs and the sample grid creates the metaballs */
-#define GLOB_COUNT 2
+#define GLOB_COUNT 15 
+
+/* range of randomly generated glob radi */
+#define GLOB_MAX_RADIUS_M 2.f
+#define GLOB_MIN_RADIUS_M 1.f
 
 /* number of vertices used in the glob (circle) mesh */
 #define GLOB_MESH_RESOLUTION 32 
@@ -50,12 +56,14 @@
 
 /*** GRID ****************************************************************************************/
 
-/* dimensions of the grid (unit: lines of samples) */
-#define SAMPLE_GRID_ROW_COUNT 200
-#define SAMPLE_GRID_COL_COUNT 200
+/* dimensions of the grid (unit: lines of samples) 
+ *
+ * note - IF YOU CHANGE THESE VALUES YOU MUST ALSO UPDATE 'SAMPLE_COUNT' */
+#define SAMPLE_GRID_ROW_COUNT 100
+#define SAMPLE_GRID_COL_COUNT 100
 
 /* GRID_SAMPLE_ROW_COUNT * GRID_SAMPLE_COL_COUNT */
-#define SAMPLE_COUNT 40000 
+#define SAMPLE_COUNT 10000 
 
 /* the maximum number of vertex components in the grid mesh; the size is twice the max number
  * of vertices; two components per vertex (2D). Should be precomputed value of:
@@ -63,8 +71,17 @@
  * why?
  *  SAMPLE_GRID_ROW/COL_COUNT = number of cell rows/columns 
  *  4 = max vertices per cell    
- *  2 = max components per vertex    */
-#define METABALLS_MESH_MAX_SIZE 2888
+ *  2 = max components per vertex    
+ *
+ * However such a mesh will be significantly too large; a grid of 200x200 cells would have a limit
+ * of:
+ *      199 * 199 * 4 * 2 = 316808 floats
+ *
+ * This would only occur if every sample was alternately actived, which will never occur with
+ * globbers. Thus set the size to a guestimate and use trial and error to find a good value for
+ * a given mesh size and glob count. Under normal conditions the generated meshes will be 
+ * considerably smaller than the max. */
+#define METABALLS_MESH_MAX_SIZE 4000
 
 #define METABALLS_MESH_COLOR_R 0.f
 #define METABALLS_MESH_COLOR_G 1.f
@@ -120,7 +137,7 @@ static GLfloat sample_colors[SAMPLE_COUNT * 3];
 #define CELL_POINT_T 3
 #define CELL_POINT_NULL -1
 
-/* marching squares loopup table. Note that this is a table of indices not points. */
+/* marching squares lookup table. Note that this is a table of indices not points. */
 int8_t const cell_lookup[16][4] = {
   {CELL_POINT_NULL, CELL_POINT_NULL, CELL_POINT_NULL, CELL_POINT_NULL}, /* case 0 */
   {CELL_POINT_L   , CELL_POINT_B   , CELL_POINT_NULL, CELL_POINT_NULL}, /* case 1 */
@@ -353,10 +370,7 @@ struct globber_t
 static GLfloat glob_vertices[GLOB_MESH_RESOLUTION * 2];
 
 /* the globbers that move around the grid, shaping the metaballs */
-static struct globber_t globbers[GLOB_COUNT] = {
-  {{3.f, 3.f}, 1.f, {0.f, 1.f}},                        //TODO: generate globs with randomness 
-  {{2.f, 1.f}, 1.f, {1.414213562f, 1.414213562f}}
-};
+static struct globber_t globbers[GLOB_COUNT];
 
 /*** GRID ****************************************************************************************/
 
@@ -550,6 +564,49 @@ generate_glob_mesh(void)
   }
 }
 
+static void
+rand_direction(struct vector2d_t *direction)
+{
+  static const int angle_resolution = 100;
+  static const float angle_quantum_rad = (2 * M_PI) / (float)angle_resolution;
+
+  float angle_rad = (rand() % angle_resolution) * angle_quantum_rad;
+
+  direction->x = cos(angle_rad);
+  direction->y = sin(angle_rad);
+}
+
+static void
+rand_position_and_radius(struct point2d_t *pos_g_m, float *radius_m)
+{
+  static const int pos_resolution = 400;
+  static const int radius_resolution = 100;
+  static const float radius_quantum_m = (GLOB_MAX_RADIUS_M - GLOB_MIN_RADIUS_M) / (float)radius_resolution;
+
+  float pos_x_quantum_g_m, pos_y_quantum_g_m;
+
+  *radius_m = ((rand() % radius_resolution) * radius_quantum_m) + GLOB_MIN_RADIUS_M;
+
+  pos_x_quantum_g_m = (sample_grid_width_m - (2 * (*radius_m))) / (float)pos_resolution;
+  pos_y_quantum_g_m = (sample_grid_height_m - (2 * (*radius_m))) / (float)pos_resolution;
+
+  pos_g_m->x = ((rand() % pos_resolution) * pos_x_quantum_g_m) + (*radius_m);
+  pos_g_m->y = ((rand() % pos_resolution) * pos_y_quantum_g_m) + (*radius_m);
+}
+
+/* generates a random set of globbers to roam the simulation */
+static void
+generate_globs(void)
+{
+  srand(time(NULL));
+
+  for(int i = 0; i < GLOB_COUNT; i++)
+  {
+    rand_direction(&(globbers[i].dir));
+    rand_position_and_radius(&(globbers[i].center_g_m), &(globbers[i].radius_m));
+  }
+}
+
 /* handles collisions between the glob and the 4 grid boundary planes: 
  *    x = 0
  *    x = sample_grid_width_m
@@ -674,9 +731,23 @@ generate_metaballs_mesh(void)
         /* add point to the mesh */
         metaballs_mesh[component_count++] = point.x;
         metaballs_mesh[component_count++] = point.y;
+
+        /* inform the user if the mesh is too large; will need to increase the size limit define 
+         * to handle the current simulation parameters */
+        if(component_count > (METABALLS_MESH_MAX_SIZE - 2))
+        {
+          fprintf(stderr, "fatal: the generated metaballs mesh is too large for the vertex buffer\n"
+                          "info: increase the buffer size by changing the define:\n"
+                          "                  METABALLS_MESH_MAX_SIZE\n");
+          printf("generated vertex component count: %d\n", component_count);
+          exit(EXIT_FAILURE);
+        }
       }
     }
   }
+
+  /* incomment to check the mesh vertex buffer is large enough */
+  //printf("generated vertex component count: %d\n", component_count);
 
   assert(component_count % 2 == 0);
 
@@ -722,6 +793,7 @@ init_metaballs(struct point2d_t grid_pos_w_m)
   init_grid(grid_pos_w_m);
   init_sample_gfx_data();
   generate_glob_mesh();
+  generate_globs();
 
   /* set initial positions and directions for the globbers */
 
