@@ -251,12 +251,88 @@ compute_cell(struct sample_t samples[4], float threshold, struct cell_t *cell)
   memcpy((void *)&cell->indices[0], (void *)&cell_lookup[cell->state_mask][0], sizeof(uint8_t) * 4);
 }
 
-/* linearly interpolate the points of a computed cell; cell must be created with function
- * 'compute_cell' prior to the lerp. */
-static void
-lerp_cell(struct cell_t *cell)
+/* used in function 'lerp_cell' */
+static float
+lerp(float threshold, float minor_weight, float major_weight)
 {
+  return CELL_SIZE_M * ((threshold - minor_weight) / (major_weight - minor_weight));
+}
 
+/* linearly interpolate the points of a computed cell; cell must be created with function
+ * 'compute_cell' prior to the lerp. Interpolation is performed as follows:
+ *
+ * For the cell:
+ *
+   *  TL    Pt     TR                                      
+   *    +----x----+                                             y
+   *    |         |       Pl = left point   -> element 0        ^
+   * Pl x         x Pr    Pb = bottom point -> element 1        |
+   *    |         |       Pr = right point  -> element 2        |
+   *    o----x----+       Pt = top point    -> element 3        o------> x
+   *  BL    Pb     BR                                        coordinate space of the cell
+   *
+   * each point has two components: x and y.
+   *
+   * Need to interpolate the points along their respective edge as a function of the weights at
+   * the vertices which define their edge, for example, we must interpolate the point Pl along 
+   * the edge BL-TL, as a function of the weights at the points BL and TL.
+   *
+   * Note that not all components of each point need to change. For the points on a horizontal
+   * edge (i.e. Pb and Pt) only the x component will change, and visa versa for the points on a 
+   * vertical edge (i.e. Pl and Pr).
+   *
+   * The interpolation equations are as follows:
+   *
+   *    Pb.x = cell_size * (threshold - weight(BL) / (weight(BR) - weight(BL))
+   *    Pt.x = cell_size * (threshold - weight(TL) / (weight(TR) - weight(TL))
+   *    Pl.y = cell_size * (threshold - weight(BL) / (weight(TL) - weight(BL))
+   *    Pr.y = cell_size * (threshold - weight(BR) / (weight(TR) - weight(BR))
+   *
+   * where:
+   *    'weight(point)' is the function which returns the weight at the point.
+   *
+   * note - for the precomputed cell, we already have the weight at each point BL, BR, TR, and TL.
+   *
+   * note - the threshold must be the same as that passed to 'compute_cell' or else the results 
+   *   are undefined.
+   */
+static void
+lerp_cell(float threshold, struct cell_t *cell)
+{
+  int8_t index;
+
+  for(int i = 0; i < 4; i++)
+  {
+    index = cell->indices[i];
+
+    /* only interpolate the points that are in use */ 
+    if(index == CELL_POINT_NULL)
+      break;
+
+    switch(index)
+    {
+    case CELL_POINT_L:
+      cell->points[index].y = lerp(threshold, 
+                                   cell->samples[CELL_WEIGHT_BL].weight, 
+                                   cell->samples[CELL_WEIGHT_TL].weight);
+      break;
+    case CELL_POINT_B:
+      cell->points[index].x = lerp(threshold, 
+                                   cell->samples[CELL_WEIGHT_BL].weight, 
+                                   cell->samples[CELL_WEIGHT_BR].weight);
+      break;
+    case CELL_POINT_R:
+      cell->points[index].y = lerp(threshold, 
+                                   cell->samples[CELL_WEIGHT_BR].weight, 
+                                   cell->samples[CELL_WEIGHT_TR].weight);
+      break;
+    case CELL_POINT_T:
+      cell->points[index].x = lerp(threshold, 
+                              cell->samples[CELL_WEIGHT_TL].weight, 
+                              cell->samples[CELL_WEIGHT_TR].weight);
+      break;
+    }
+  }
 }
 
 /*** GLOBBERS ************************************************************************************/
@@ -574,6 +650,8 @@ generate_metaballs_mesh(void)
       samples[CELL_WEIGHT_TL].weight = grid.samples[col  ][row+1].weight;
 
       compute_cell(samples, 1.f, &cell); 
+
+      lerp_cell(1.f, &cell);
 
       for(int i = 0; i < 4; i++)
       {
