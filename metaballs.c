@@ -24,6 +24,7 @@
 #define SAMPLE_COLOR_G_OFFSET  1
 #define SAMPLE_COLOR_B_OFFSET  2
 
+/* controls the size of rendered sample points */
 #define SAMPLE_DRAW_DIAMETER_PX 3
 
 /*** CELLS ***************************************************************************************/
@@ -34,7 +35,7 @@
 /*** GLOBBERS ************************************************************************************/
 
 /* the number of globs moving around the simulation; the interaction
- * between these globs and the sample grid creates the metaballs */
+ * between these globs and the sample grid creates the metaballs (isolines) */
 #define GLOB_COUNT 15 
 
 /* range of randomly generated glob radi */
@@ -47,6 +48,7 @@
 /* width of glob circle mesh lines */
 #define GLOB_DRAW_WIDTH_PX 3
 
+/* color of the roaming globbers */
 #define GLOB_COLOR_R 0.f
 #define GLOB_COLOR_G 1.f
 #define GLOB_COLOR_B 1.f
@@ -79,10 +81,11 @@
  *      199 * 199 * 4 * 2 = 316808 floats
  *
  * This would only occur if every sample was alternately actived, which will never occur with
- * globbers. Thus set the size to a guestimate and use trial and error to find a good value for
+ * globbers. Thus set the size to a guesstimate and use trial and error to find a good value for
  * a given mesh size and glob count. Under normal conditions the generated meshes will be 
- * considerably smaller than the max. */
-#define ISOLINES_MESH_MAX_SIZE 12000
+ * considerably smaller than the max. If the mesh is too small the program will abort and tell
+ * you. */
+#define ISOLINES_MESH_MAX_SIZE 13000
 
 #define ISOLINES_MESH_COLOR_R 1.f
 #define ISOLINES_MESH_COLOR_G 0.f
@@ -576,9 +579,6 @@ weight_to_color(float weight, float *r, float *g, float *b)
     *r = ((1.f - weight) * inverse_limit * (1.f - SAMPLE_INACTIVE_GREY)) + SAMPLE_INACTIVE_GREY;
   }
 
-  //else if(weight < 20.f)
-  //  *r = *b = (((weight - cutoff) * 0.05263157895f) * 0.6f) + 0.4f;  /* 1.0/19.0 = 0.05263157895 */
-
   else
     *r = *g = *b = 1.f;
   
@@ -830,7 +830,7 @@ generate_isolines_mesh(float threshold)
     current_column_cache = cell_column_cache[(int)cell_column_cache_id];
   }
 
-  /* incomment to check the mesh vertex buffer is large enough */
+  /* uncomment to check the mesh vertex buffer is large enough */
   //printf("generated vertex component count: %d\n", isolines_mesh_component_count);
 
   assert(isolines_mesh_component_count % 2 == 0);
