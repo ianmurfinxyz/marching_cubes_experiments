@@ -8,7 +8,7 @@
 #include <time.h>
 #include <math.h>
 
-#include "metaballs.h"
+#include "isolines.h"
 
 /*** SAMPLES *************************************************************************************/
 
@@ -35,7 +35,7 @@
 /*** GLOBBERS ************************************************************************************/
 
 /* the number of globs moving around the simulation; the interaction
- * between these globs and the sample grid creates the metaballs (isolines) */
+ * between these globs and the sample grid creates the isolines */
 #define GLOB_COUNT 15 
 
 /* range of randomly generated glob radi */
@@ -399,7 +399,7 @@ struct globber_t
 /* the glob mesh drawn by opengl */
 static GLfloat glob_vertices[GLOB_MESH_RESOLUTION * 2];
 
-/* the globbers that move around the grid, shaping the metaballs */
+/* the globbers that move around the grid, shaping the isolines */
 static struct globber_t globbers[GLOB_COUNT];
 
 /*** GRID ****************************************************************************************/
@@ -814,7 +814,7 @@ generate_isolines_mesh(float threshold)
          * to handle the current simulation parameters */
         if(isolines_mesh_component_count > (ISOLINES_MESH_MAX_SIZE - 2))
         {
-          fprintf(stderr, "fatal: the generated metaballs mesh is too large for the vertex buffer\n"
+          fprintf(stderr, "fatal: the generated isolines mesh is too large for the vertex buffer\n"
                           "info: increase the buffer size by changing the define:\n"
                           "                  ISOLINES_MESH_MAX_SIZE\n");
           printf("generated vertex component count: %d\n", isolines_mesh_component_count);
@@ -870,7 +870,7 @@ draw_isolines_mesh(void)
 /*** MODULE INTERFACE  ***************************************************************************/
 
 void
-init_metaballs(struct point2d_t grid_pos_w_m)
+init_isolines(struct point2d_t grid_pos_w_m)
 {
   init_grid(grid_pos_w_m);
   init_sample_gfx_data();
@@ -879,7 +879,7 @@ init_metaballs(struct point2d_t grid_pos_w_m)
 }
 
 void
-tick_metaballs(void)
+tick_isolines(void)
 {
   tick_globs();
   tick_grid();
@@ -891,7 +891,7 @@ tick_metaballs(void)
 }
 
 void
-draw_metaballs(void)
+draw_isolines(void)
 {
   glPushMatrix();
   glTranslatef(grid.pos_w_m.x, grid.pos_w_m.y, 0.f);

@@ -5,55 +5,13 @@
 #include <stdio.h>
 #include <assert.h>
 #include "clock.h"
-
-#include "metaballs.h"
+#include "isolines.h"
 
 #define TICK_DELTA_S 0.0166666
 #define MAX_TICKS_PER_FRAME 5
 
-#define SCREEN_WIDTH_PX 1500
-#define SCREEN_HEIGHT_PX 800
-
-/**** CUBE MODEL *************************************************************/
-
-static GLfloat cube_vertices[] = {
-  -1.0f, -1.0f,  1.0f,  
-   1.0f, -1.0f,  1.0f,
-   1.0f,  1.0f,  1.0f,
-  -1.0f,  1.0f,  1.0f,
-  -1.0f, -1.0f, -1.0f,  
-   1.0f, -1.0f, -1.0f,
-   1.0f,  1.0f, -1.0f,
-  -1.0f,  1.0f, -1.0f
-}; /* size = 12 */
-
-static GLfloat cube_colors[] = {
-  1.0f, 0.f, 0.f,
-  1.0f, 0.f, 0.f,
-  1.0f, 0.f, 0.f,
-  1.0f, 0.f, 0.f,
-  0.0f, 1.f, 0.f,
-  0.0f, 1.f, 0.f,
-  0.0f, 1.f, 0.f,
-  0.0f, 1.f, 0.f
-}; /* size = 12 */
-
-static GLubyte cube_indices[] = {
-  0, 1, 2,
-  0, 2, 3,
-  1, 5, 6,
-  1, 6, 2,
-  5, 4, 7,
-  5, 7, 6, 
-  4, 0, 3,
-  4, 3, 7,
-  3, 2, 6,
-  3, 6, 7,
-  1, 0, 4, 
-  1, 4, 5
-}; /* size == 36 */
-
-/*** WORLD AXES **************************************************************/
+#define SCREEN_WIDTH_PX 1280
+#define SCREEN_HEIGHT_PX 720
 
 static GLfloat axis_vertices[] = {
    0.f  , 0.f  , 0.f  ,
@@ -77,82 +35,8 @@ static GLfloat axis_colors[] = {
   1.0f, 1.0f, 0.0f,       /* (-)y-axis */
 }; /* size = 8 */
 
-/*** WORLD AXES **************************************************************/
-
 static SDL_GLContext glcontext;
 static SDL_Window *window;
-
-static const int xz_grid_lines = 31; /* num lines per dimension; square grid */
-static const int xz_grid_vertex_count = (xz_grid_lines * 2 * 2);
-static const int xz_grid_vertex_component_count = xz_grid_vertex_count * 3;
-static const float cell_width_m = 1.f;
-static const float grid_width_m = cell_width_m * (float)xz_grid_lines;
-static const float grid_half_width_m = grid_width_m * 0.5f;
-static GLfloat xzgrid[372]; 
-
-/* generate_xz_grid - generates a vertex array which can be used to render
- * a grid in the world space x-z plane. The grid is centered about it's origin.
- *
- * @vertex_array - buffer to store generated vertices.
- * @ox,oy,oz - position vector to origin of the grid.
- * @d - distance between grid lines (unit: meters).
- * @nx - num lines perpendicular to x-axis in grid.
- * @nz - num lines perpendicular to z-axis in grid.
- *
- * note - the @vertex_array MUST be large enough to store all the generated
- * vertices or a seg fault will occur. The number of generated vertices can
- * be calculated as:
- *    
- *    num_vertices = (nx + ny) * 2 * 3
- *
- * why? nx + ny = num lines in grid, then have 2 points per line and 3 vertices
- * per point.
- *
- * note - nx and nz should be odd values to allow the grid to be evenly spaced
- * about the origin; the odd, extra line in each dimension is the center line
- * in that dimension. This approach is taken to allow the center line to be
- * rendered as the axes of the grid and have the grid evenly spaced about the
- * axes. If nx or nz is even, they are made odd by subtracting 1.
- */
-void
-generate_xz_grid(GLfloat *vertex_array, float d_m, int nx, int nz)
-{
-  assert(vertex_array != NULL);
-
-  int nhx, nhz, v = 0;
-
-  if(nx % 2 == 0)
-    nx--;
-  if(nz % 2 == 0)
-    nz--;
-
-  nhx = (nx - 1) / 2;
-  nhz = (nz - 1) / 2;
-
-  /* generate the lines perpendicular to the x-axis */
-  for(int i = -nhx; i <= nhx; ++i)
-  {
-    vertex_array[v++] = (d_m * i);
-    vertex_array[v++] = 0.f;
-    vertex_array[v++] = (-nhz) * d_m;
-
-    vertex_array[v++] = (d_m * i);
-    vertex_array[v++] = 0.f;
-    vertex_array[v++] = nhz * d_m;
-  }
-
-  /* generate the lines perpendicular to the z-axis */
-  for(int i = -nhz; i <= nhz; ++i)
-  {
-    vertex_array[v++] = (-nhx) * d_m;
-    vertex_array[v++] = 0.f;
-    vertex_array[v++] = d_m * i;
-
-    vertex_array[v++] = nhx * d_m;
-    vertex_array[v++] = 0.f;
-    vertex_array[v++] = (d_m * i);
-  }
-}
 
 static void
 init()
@@ -218,8 +102,6 @@ run()
   struct clock real_clock;
   clock_init(&real_clock, CLOCK_MONOTONIC);
 
-  generate_xz_grid(xzgrid, 1.f, xz_grid_lines, xz_grid_lines);
-
   glEnableClientState(GL_VERTEX_ARRAY);
 
   glCullFace(GL_BACK);
@@ -236,9 +118,9 @@ run()
   camera.x = camera.y = 0.f;
   camera.z = 20.f;
   camera.y_move = camera.x_move = 0;
-  float camera_delta_pos_m = 1.f * TICK_DELTA_S;
+  float camera_delta_pos_m = 10.f * TICK_DELTA_S;
 
-  init_metaballs((struct point2d_t){1.f, 1.f});
+  init_isolines((struct point2d_t){1.f, 1.f});
 
   double next_tick_s = TICK_DELTA_S;
   bool redraw = true;
@@ -321,7 +203,7 @@ run()
       camera.x += camera.x_move * camera_delta_pos_m;
       camera.y += camera.y_move * camera_delta_pos_m;
 
-      tick_metaballs();
+      tick_isolines();
 
       next_tick_s += TICK_DELTA_S;
       ++tick_count;
@@ -337,25 +219,7 @@ run()
       glLoadIdentity();
       glTranslatef(camera.x, -camera.y, -camera.z);
 
-      /* draw xy grid */
-      //glDisableClientState(GL_COLOR_ARRAY);
-      //glColor3f(0.5f, 0.5f, 0.5f);
-      //glVertexPointer(3, GL_FLOAT, 0, xzgrid);
-      //glPushMatrix();
-      ////glTranslatef(grid_half_width_m, grid_half_width_m, 0.f);
-      //glRotatef(90.f, 1.0f, 0.0f, 0.0f);
-      //glDrawArrays(GL_LINES, 0, xz_grid_vertex_count);
-      //glPopMatrix();
-
       glEnableClientState(GL_COLOR_ARRAY);
-
-      /* draw cube */
-      //glPushMatrix();
-      //glRotatef(90.f, 0.0f, 1.0f, 0.0f);
-      //glVertexPointer(3, GL_FLOAT, 0, cube_vertices);
-      //glColorPointer(3, GL_FLOAT, 0, cube_colors);
-      //glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_BYTE, cube_indices);
-      //glPopMatrix();
 
       /* draw world space axes */
       glLineWidth(2.0);
@@ -365,7 +229,7 @@ run()
       glLineWidth(1.0);
       glDisableClientState(GL_COLOR_ARRAY);
 
-      draw_metaballs();
+      draw_isolines();
 
       SDL_GL_SwapWindow(window);
       redraw = false;
@@ -373,17 +237,11 @@ run()
   }
 }
 
-static void
-shutdown()
-{
-}
-
 int 
 main(int argc, char *argv[])
 {
   init();
   run();
-  shutdown();
   exit(EXIT_SUCCESS);
 }
 

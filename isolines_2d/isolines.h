@@ -1,5 +1,5 @@
-#ifndef _METABALLS_H_
-#define _METABALLS_H_
+#ifndef _ISOLINES_H_
+#define _ISOLINES_H_
 
 /* a point (position vector) in a 2d plane */
 struct point2d_t
@@ -16,13 +16,13 @@ struct vector2d_t
 };
 
 void
-init_metaballs(struct point2d_t grid_pos_w_m);
+init_isolines(struct point2d_t grid_pos_w_m);
 
 void
-tick_metaballs(void);
+tick_isolines(void);
 
 void
-draw_metaballs(void);
+draw_isolines(void);
 
 
 #endif
