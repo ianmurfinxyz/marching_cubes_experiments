@@ -13,7 +13,7 @@
 /*** SAMPLES *************************************************************************************/
 
 /* value of each color component of a sample when that sample is inactive */
-#define SAMPLE_INACTIVE_GREY 0.4f
+#define SAMPLE_INACTIVE_GREY 0.3f
 
 /* convenience macros defining component offsets for accessing sample data */
 #define SAMPLE_VERTEX_COMPONENT_COUNT 2
@@ -24,7 +24,7 @@
 #define SAMPLE_COLOR_G_OFFSET  1
 #define SAMPLE_COLOR_B_OFFSET  2
 
-#define SAMPLE_DRAW_DIAMETER_PX 1
+#define SAMPLE_DRAW_DIAMETER_PX 3
 
 /*** CELLS ***************************************************************************************/
 
@@ -38,18 +38,18 @@
 #define GLOB_COUNT 15 
 
 /* range of randomly generated glob radi */
-#define GLOB_MAX_RADIUS_M 2.f
+#define GLOB_MAX_RADIUS_M 3.f
 #define GLOB_MIN_RADIUS_M 1.f
 
 /* number of vertices used in the glob (circle) mesh */
 #define GLOB_MESH_RESOLUTION 32 
 
 /* width of glob circle mesh lines */
-#define GLOB_DRAW_WIDTH_PX 2
+#define GLOB_DRAW_WIDTH_PX 3
 
-#define GLOB_COLOR_R 1.f
-#define GLOB_COLOR_G 0.f
-#define GLOB_COLOR_B 0.f
+#define GLOB_COLOR_R 0.f
+#define GLOB_COLOR_G 1.f
+#define GLOB_COLOR_B 1.f
 
 /* change in position of globs each tick, precomputation of:
  *    glob_speed * TICK_DELTA_S      */
@@ -82,17 +82,25 @@
  * globbers. Thus set the size to a guestimate and use trial and error to find a good value for
  * a given mesh size and glob count. Under normal conditions the generated meshes will be 
  * considerably smaller than the max. */
-#define METABALLS_MESH_MAX_SIZE 4000
+#define ISOLINES_MESH_MAX_SIZE 12000
 
-#define METABALLS_MESH_COLOR_R 0.f
-#define METABALLS_MESH_COLOR_G 1.f
-#define METABALLS_MESH_COLOR_B 0.f
+#define ISOLINES_MESH_COLOR_R 1.f
+#define ISOLINES_MESH_COLOR_G 0.f
+#define ISOLINES_MESH_COLOR_B 0.4f
 
-#define METABALLS_MESH_DRAW_WIDTH_PX 2
+#define ISOLINES_MESH_DRAW_WIDTH_PX 3
 
 /* dimensions of the grid in meters */
 static const float sample_grid_width_m = (SAMPLE_GRID_ROW_COUNT - 1) * CELL_SIZE_M;
 static const float sample_grid_height_m = (SAMPLE_GRID_COL_COUNT - 1) * CELL_SIZE_M;
+
+/* the number of threshold levels (or isovalues) for which to generate and render isolines. The
+ * greater this number the more memory will be required for the isolines mesh, thus make sure
+ * to increase that too (set with ISOLINES_MESH_MAX_SIZE) */
+#define THRESHOLD_COUNT 5
+
+/* the threshold (isovalues) to generate contour lines for */
+static const float thresholds[THRESHOLD_COUNT] = {0.6f, 0.8f, 1.f, 1.3f, 2.f};
 
 /*** SAMPLES *************************************************************************************/
 
@@ -428,10 +436,10 @@ struct sample_grid_t
 static struct sample_grid_t grid;
 
 /* the current number of vertex components in the grid mesh */
-static int metaballs_mesh_size;
+static int isolines_mesh_component_count;
 
 /* vertex buffer to store generated sample grid mesh */
-static GLfloat metaballs_mesh[METABALLS_MESH_MAX_SIZE];
+static GLfloat isolines_mesh[ISOLINES_MESH_MAX_SIZE];
 
 /* cell caches used to optimise cell processing (in function 'generate_isolines_mesh'). Avoids 
  * the naive approach of performing every linear interpolation twice, which results from processing
@@ -552,16 +560,44 @@ calculate_sample_weights_sum(struct point2d_t sample_pos_g_m)
 static void
 weight_to_color(float weight, float *r, float *g, float *b)
 {
+  static const float cutoff = 0.7f;
+  static const float limit = 20.f;
+  static const float inverse_limit = 1.f / limit;
+
   *r = *g = *b = 0.f;
 
-  if(weight < 1.f)
+  /* linear ramp of 2 colors with cut-off boundary */
+  if(weight < cutoff)
     *r = *g = *b = SAMPLE_INACTIVE_GREY;
 
-  else if(weight < 20.f)
-    *g = (((weight - 1.f) * 0.05263157895f) * 0.6f) + 0.4f;  /* 1.0/19.0 = 0.05263157895 */
+  else if(weight < limit)
+  {
+    *b = (weight * inverse_limit * (1.f - SAMPLE_INACTIVE_GREY)) + SAMPLE_INACTIVE_GREY;
+    *r = ((1.f - weight) * inverse_limit * (1.f - SAMPLE_INACTIVE_GREY)) + SAMPLE_INACTIVE_GREY;
+  }
+
+  //else if(weight < 20.f)
+  //  *r = *b = (((weight - cutoff) * 0.05263157895f) * 0.6f) + 0.4f;  /* 1.0/19.0 = 0.05263157895 */
 
   else
     *r = *g = *b = 1.f;
+  
+  //static const float inverse_limit = 1.f / 10.f;
+  ////static const float half_pi = M_PI * 0.5f;
+  //
+  //float value = weight * inverse_limit;
+  //if(value > 1.f)
+  //  value = 1.f;
+
+  // approximate exponential ramp of 2 colors
+  ////*r = -cos(value * half_pi) + 1.f;
+  ////*b = cos(value * half_pi);
+  //
+  // linear ramp of 2 colors
+  //*r = value;
+  //*b = 1.f - value;
+  //if(weight > 1.f)
+  //  printf("weight=%f, value=%f, color={r:%f, g:%f, b:%f}\n", weight, value, *r, *g, *b);
 }
 
 static void
@@ -714,17 +750,21 @@ init_grid(struct point2d_t grid_pos_w_m)
   memset((void *)grid.samples, 0, sizeof(struct sample_t) * SAMPLE_GRID_COL_COUNT * SAMPLE_GRID_ROW_COUNT);
 }
 
+static inline void
+reset_isolines_mesh()
+{
+  isolines_mesh_component_count = 0;
+}
 
 /* generates a vertex mesh from the sample grid; uses marching cubes. The mesh will consist of
  * a set of disconnected lines. */
 static void
-generate_isolines_mesh(void)
+generate_isolines_mesh(float threshold)
 {
   struct point2d_t point;
   struct cell_t *current_cell, *bottom_cell, *left_cell;
   struct sample_t samples[4];
   struct cell_t *left_column_cache, *current_column_cache;
-  int component_count = 0;
   bool cell_column_cache_id = 0; /* bool used to easily flip between 0 and 1 */
 
   left_column_cache = NULL;
@@ -741,12 +781,12 @@ generate_isolines_mesh(void)
 
       current_cell = &current_column_cache[row];
 
-      compute_cell(samples, 1.f, current_cell); 
+      compute_cell(samples, threshold, current_cell); 
 
       bottom_cell = (row > 0) ? &current_column_cache[row - 1] : NULL;
       left_cell = (left_column_cache != NULL) ? &left_column_cache[row] : NULL;
 
-      lerp_cell(1.f, current_cell, bottom_cell, left_cell);
+      lerp_cell(threshold, current_cell, bottom_cell, left_cell);
 
       for(int i = 0; i < 4; i++)
       {
@@ -767,17 +807,17 @@ generate_isolines_mesh(void)
         point.y += row * CELL_SIZE_M;
 
         /* add point to the mesh */
-        metaballs_mesh[component_count++] = point.x;
-        metaballs_mesh[component_count++] = point.y;
+        isolines_mesh[isolines_mesh_component_count++] = point.x;
+        isolines_mesh[isolines_mesh_component_count++] = point.y;
 
         /* inform the user if the mesh is too large; will need to increase the size limit define 
          * to handle the current simulation parameters */
-        if(component_count > (METABALLS_MESH_MAX_SIZE - 2))
+        if(isolines_mesh_component_count > (ISOLINES_MESH_MAX_SIZE - 2))
         {
           fprintf(stderr, "fatal: the generated metaballs mesh is too large for the vertex buffer\n"
                           "info: increase the buffer size by changing the define:\n"
-                          "                  METABALLS_MESH_MAX_SIZE\n");
-          printf("generated vertex component count: %d\n", component_count);
+                          "                  ISOLINES_MESH_MAX_SIZE\n");
+          printf("generated vertex component count: %d\n", isolines_mesh_component_count);
           exit(EXIT_FAILURE);
         }
       }
@@ -791,11 +831,9 @@ generate_isolines_mesh(void)
   }
 
   /* incomment to check the mesh vertex buffer is large enough */
-  //printf("generated vertex component count: %d\n", component_count);
+  //printf("generated vertex component count: %d\n", isolines_mesh_component_count);
 
-  assert(component_count % 2 == 0);
-
-  metaballs_mesh_size = component_count;
+  assert(isolines_mesh_component_count % 2 == 0);
 }
 
 static void
@@ -819,13 +857,13 @@ tick_grid(void)
 }
 
 static void
-draw_metaballs_mesh(void)
+draw_isolines_mesh(void)
 {
   glDisableClientState(GL_COLOR_ARRAY);
-  glColor3f(METABALLS_MESH_COLOR_R, METABALLS_MESH_COLOR_G, METABALLS_MESH_COLOR_B);
-  glLineWidth(METABALLS_MESH_DRAW_WIDTH_PX);
-  glVertexPointer(2, GL_FLOAT, 0, metaballs_mesh);
-  glDrawArrays(GL_LINES, 0, metaballs_mesh_size >> 1);
+  glColor3f(ISOLINES_MESH_COLOR_R, ISOLINES_MESH_COLOR_G, ISOLINES_MESH_COLOR_B);
+  glLineWidth(ISOLINES_MESH_DRAW_WIDTH_PX);
+  glVertexPointer(2, GL_FLOAT, 0, isolines_mesh);
+  glDrawArrays(GL_LINES, 0, isolines_mesh_component_count >> 1);
   glLineWidth(1.f);
 }
 
@@ -845,7 +883,11 @@ tick_metaballs(void)
 {
   tick_globs();
   tick_grid();
-  generate_isolines_mesh();
+
+  reset_isolines_mesh();
+
+  for(int i = 0; i < THRESHOLD_COUNT; ++i)
+    generate_isolines_mesh(thresholds[i]);
 }
 
 void
@@ -855,7 +897,7 @@ draw_metaballs(void)
   glTranslatef(grid.pos_w_m.x, grid.pos_w_m.y, 0.f);
 
   draw_samples();
-  draw_metaballs_mesh();
+  draw_isolines_mesh();
   draw_globs();
 
   glPopMatrix();
