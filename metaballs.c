@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <time.h>
 #include <math.h>
 
@@ -314,7 +315,7 @@ lerp(float threshold, float minor_weight, float major_weight)
    *   are undefined.
    */
 static void
-lerp_cell(float threshold, struct cell_t *cell)
+lerp_cell(float threshold, struct cell_t *cell, struct cell_t *bottom, struct cell_t *left)
 {
   int8_t index;
 
@@ -329,14 +330,32 @@ lerp_cell(float threshold, struct cell_t *cell)
     switch(index)
     {
     case CELL_POINT_L:
-      cell->points[index].y = lerp(threshold, 
-                                   cell->samples[CELL_WEIGHT_BL].weight, 
-                                   cell->samples[CELL_WEIGHT_TL].weight);
+      /* any cell with a left point, will have a cell left of it with a coincident and already 
+       * lerped right point; we can reuse that. The only exception is cells at col == 0 */
+      if(left != NULL)
+      {
+        cell->points[index].y = left->points[CELL_POINT_R].y;
+      }
+      else
+      {
+        cell->points[index].y = lerp(threshold, 
+                                     cell->samples[CELL_WEIGHT_BL].weight, 
+                                     cell->samples[CELL_WEIGHT_TL].weight);
+      }
       break;
     case CELL_POINT_B:
-      cell->points[index].x = lerp(threshold, 
-                                   cell->samples[CELL_WEIGHT_BL].weight, 
-                                   cell->samples[CELL_WEIGHT_BR].weight);
+      /* any cell with a bottom point, will have a cell below it with a coincident and already 
+       * lerped top point; we can reuse that. The only exception is cells at row == 0 */
+      if(bottom != NULL)
+      {
+        cell->points[index].x = bottom->points[CELL_POINT_T].x;
+      }
+      else
+      {
+        cell->points[index].x = lerp(threshold, 
+                                     cell->samples[CELL_WEIGHT_BL].weight, 
+                                     cell->samples[CELL_WEIGHT_BR].weight);
+      }
       break;
     case CELL_POINT_R:
       cell->points[index].y = lerp(threshold, 
@@ -413,6 +432,14 @@ static int metaballs_mesh_size;
 
 /* vertex buffer to store generated sample grid mesh */
 static GLfloat metaballs_mesh[METABALLS_MESH_MAX_SIZE];
+
+/* cell caches used to optimise cell processing (in function 'generate_isolines_mesh'). Avoids 
+ * the naive approach of performing every linear interpolation twice, which results from processing
+ * all cells independently. Note that we only need to cache two columns at a time; the currently
+ * being processed column and the prior (left) column. This is because we process cells column per
+ * column, from bottom (row 0) to top (row max), and each cell only needs data from the cell below
+ * it or to the left of it to avoid duplicate lerps */
+static struct cell_t cell_column_cache[2][SAMPLE_GRID_ROW_COUNT];
 
 /*** SAMPLES *************************************************************************************/
 
@@ -687,15 +714,21 @@ init_grid(struct point2d_t grid_pos_w_m)
   memset((void *)grid.samples, 0, sizeof(struct sample_t) * SAMPLE_GRID_COL_COUNT * SAMPLE_GRID_ROW_COUNT);
 }
 
+
 /* generates a vertex mesh from the sample grid; uses marching cubes. The mesh will consist of
  * a set of disconnected lines. */
 static void
-generate_metaballs_mesh(void)
+generate_isolines_mesh(void)
 {
   struct point2d_t point;
-  struct cell_t cell;
+  struct cell_t *current_cell, *bottom_cell, *left_cell;
   struct sample_t samples[4];
+  struct cell_t *left_column_cache, *current_column_cache;
   int component_count = 0;
+  bool cell_column_cache_id = 0; /* bool used to easily flip between 0 and 1 */
+
+  left_column_cache = NULL;
+  current_column_cache = cell_column_cache[(int)cell_column_cache_id];
 
   for(int col = 0; col < (SAMPLE_GRID_COL_COUNT - 1); col++)
   {
@@ -706,13 +739,18 @@ generate_metaballs_mesh(void)
       samples[CELL_WEIGHT_TR].weight = grid.samples[col+1][row+1].weight;
       samples[CELL_WEIGHT_TL].weight = grid.samples[col  ][row+1].weight;
 
-      compute_cell(samples, 1.f, &cell); 
+      current_cell = &current_column_cache[row];
 
-      lerp_cell(1.f, &cell);
+      compute_cell(samples, 1.f, current_cell); 
+
+      bottom_cell = (row > 0) ? &current_column_cache[row - 1] : NULL;
+      left_cell = (left_column_cache != NULL) ? &left_column_cache[row] : NULL;
+
+      lerp_cell(1.f, current_cell, bottom_cell, left_cell);
 
       for(int i = 0; i < 4; i++)
       {
-        if(cell.indices[i] == CELL_POINT_NULL)
+        if(current_cell->indices[i] == CELL_POINT_NULL)
         {
           /* ensure indicies come in pairs as intended */
           assert(i % 2 == 0); 
@@ -721,8 +759,8 @@ generate_metaballs_mesh(void)
           break;
         }
         
-        /* cell space point */
-        point = cell.points[cell.indices[i]];
+        /* local cell space point */
+        point = current_cell->points[current_cell->indices[i]];
 
         /* translate to grid space */
         point.x += col * CELL_SIZE_M;
@@ -744,6 +782,12 @@ generate_metaballs_mesh(void)
         }
       }
     }
+
+    /* swap the caches so we will overrite the old left column with the next column of cells we
+     * are due to process in the next loop iteration; only need to cache two columns */
+    left_column_cache = current_column_cache;
+    cell_column_cache_id = !cell_column_cache_id;
+    current_column_cache = cell_column_cache[(int)cell_column_cache_id];
   }
 
   /* incomment to check the mesh vertex buffer is large enough */
@@ -794,9 +838,6 @@ init_metaballs(struct point2d_t grid_pos_w_m)
   init_sample_gfx_data();
   generate_glob_mesh();
   generate_globs();
-
-  /* set initial positions and directions for the globbers */
-
 }
 
 void
@@ -804,7 +845,7 @@ tick_metaballs(void)
 {
   tick_globs();
   tick_grid();
-  generate_metaballs_mesh();
+  generate_isolines_mesh();
 }
 
 void
